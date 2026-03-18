@@ -1,6 +1,7 @@
 """Click-based CLI entry point."""
 
 import os
+import sys
 
 import click
 from dotenv import load_dotenv
@@ -12,6 +13,30 @@ def _fmt_time(seconds: float) -> str:
     """Format seconds as MM:SS."""
     m, s = divmod(int(seconds), 60)
     return f"{m:02d}:{s:02d}"
+
+
+def _handle_error(e: Exception) -> None:
+    """Print a user-friendly error and exit."""
+    from .embedder import GeminiAPIKeyError, GeminiQuotaError
+
+    if isinstance(e, GeminiAPIKeyError):
+        click.secho("Error: " + str(e), fg="red", err=True)
+        raise SystemExit(1)
+    if isinstance(e, GeminiQuotaError):
+        click.secho("Error: " + str(e), fg="yellow", err=True)
+        raise SystemExit(1)
+    if isinstance(e, RuntimeError) and "ffmpeg" in str(e).lower():
+        click.secho(
+            "Error: ffmpeg is not available.\n\n"
+            "Install it with one of:\n"
+            "  Ubuntu/Debian:  sudo apt install ffmpeg\n"
+            "  macOS:          brew install ffmpeg\n"
+            "  pip fallback:   pip install imageio-ffmpeg",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
+    raise e
 
 
 @click.group()
@@ -29,56 +54,68 @@ def cli():
               help="Chunk duration in seconds.")
 @click.option("--overlap", default=5, show_default=True,
               help="Overlap between chunks in seconds.")
-def index(directory, chunk_duration, overlap):
+@click.option("--verbose", is_flag=True, help="Show debug info.")
+def index(directory, chunk_duration, overlap, verbose):
     """Index mp4 files in DIRECTORY for searching."""
     from .chunker import chunk_video, scan_directory
     from .embedder import embed_video_chunk
     from .store import SentryStore
 
-    if os.path.isfile(directory):
-        videos = [os.path.abspath(directory)]
-    else:
-        videos = scan_directory(directory)
+    try:
+        if os.path.isfile(directory):
+            videos = [os.path.abspath(directory)]
+        else:
+            videos = scan_directory(directory)
 
-    if not videos:
-        click.echo("No mp4 files found.")
-        return
+        if not videos:
+            click.echo("No mp4 files found.")
+            return
 
-    store = SentryStore()
-    total_files = len(videos)
-    new_files = 0
-    new_chunks = 0
+        store = SentryStore()
+        total_files = len(videos)
+        new_files = 0
+        new_chunks = 0
 
-    for file_idx, video_path in enumerate(videos, 1):
-        abs_path = os.path.abspath(video_path)
-        basename = os.path.basename(video_path)
+        if verbose:
+            click.echo(f"[verbose] DB path: {store._client._identifier}", err=True)
+            click.echo(f"[verbose] chunk_duration={chunk_duration}s, overlap={overlap}s", err=True)
 
-        if store.is_indexed(abs_path):
-            click.echo(f"Skipping ({file_idx}/{total_files}): {basename} (already indexed)")
-            continue
+        for file_idx, video_path in enumerate(videos, 1):
+            abs_path = os.path.abspath(video_path)
+            basename = os.path.basename(video_path)
 
-        chunks = chunk_video(abs_path, chunk_duration=chunk_duration, overlap=overlap)
-        num_chunks = len(chunks)
-        embedded = []
+            if store.is_indexed(abs_path):
+                click.echo(f"Skipping ({file_idx}/{total_files}): {basename} (already indexed)")
+                continue
 
-        for chunk_idx, chunk in enumerate(chunks, 1):
-            click.echo(
-                f"Indexing file {file_idx}/{total_files}: {basename} "
-                f"[chunk {chunk_idx}/{num_chunks}]"
-            )
-            embedding = embed_video_chunk(chunk["chunk_path"])
-            embedded.append({**chunk, "embedding": embedding})
+            chunks = chunk_video(abs_path, chunk_duration=chunk_duration, overlap=overlap)
+            num_chunks = len(chunks)
+            embedded = []
 
-        store.add_chunks(embedded)
-        new_files += 1
-        new_chunks += len(embedded)
+            if verbose:
+                click.echo(f"  [verbose] {basename}: duration split into {num_chunks} chunks", err=True)
 
-    stats = store.get_stats()
-    click.echo(
-        f"\nIndexed {new_chunks} new chunks from {new_files} files. "
-        f"Total: {stats['total_chunks']} chunks from "
-        f"{stats['unique_source_files']} files."
-    )
+            for chunk_idx, chunk in enumerate(chunks, 1):
+                click.echo(
+                    f"Indexing file {file_idx}/{total_files}: {basename} "
+                    f"[chunk {chunk_idx}/{num_chunks}]"
+                )
+                embedding = embed_video_chunk(chunk["chunk_path"], verbose=verbose)
+                embedded.append({**chunk, "embedding": embedding})
+
+            store.add_chunks(embedded)
+            new_files += 1
+            new_chunks += len(embedded)
+
+        stats = store.get_stats()
+        click.echo(
+            f"\nIndexed {new_chunks} new chunks from {new_files} files. "
+            f"Total: {stats['total_chunks']} chunks from "
+            f"{stats['unique_source_files']} files."
+        )
+
+    except Exception as e:
+        _handle_error(e)
 
 
 # -----------------------------------------------------------------------
@@ -93,31 +130,57 @@ def index(directory, chunk_duration, overlap):
               help="Directory to save trimmed clips.")
 @click.option("--trim/--no-trim", default=True, show_default=True,
               help="Auto-trim the top result.")
-def search(query, n_results, output_dir, trim):
+@click.option("--verbose", is_flag=True, help="Show debug info.")
+def search(query, n_results, output_dir, trim, verbose):
     """Search indexed footage with a natural language QUERY."""
     from .search import search_footage
     from .store import SentryStore
 
-    store = SentryStore()
-    results = search_footage(query, store, n_results=n_results)
+    try:
+        store = SentryStore()
 
-    if not results:
-        click.echo("No results found.")
-        return
+        if store.get_stats()["total_chunks"] == 0:
+            click.echo(
+                "No indexed footage found. "
+                "Run `sentrysearch index <directory>` first."
+            )
+            return
 
-    for i, r in enumerate(results, 1):
-        basename = os.path.basename(r["source_file"])
-        start_str = _fmt_time(r["start_time"])
-        end_str = _fmt_time(r["end_time"])
-        click.echo(
-            f"  #{i} [{r['similarity_score']:.2f}] {basename} "
-            f"@ {start_str}-{end_str}"
-        )
+        results = search_footage(query, store, n_results=n_results, verbose=verbose)
 
-    if trim:
-        from .trimmer import trim_top_result
-        clip_path = trim_top_result(results, output_dir)
-        click.echo(f"\nSaved clip: {clip_path}")
+        if not results:
+            click.echo(
+                "No results found.\n\n"
+                "Suggestions:\n"
+                "  - Try a broader or different query\n"
+                "  - Re-index with smaller --chunk-duration for finer granularity\n"
+                "  - Check `sentrysearch stats` to see what's indexed"
+            )
+            return
+
+        for i, r in enumerate(results, 1):
+            basename = os.path.basename(r["source_file"])
+            start_str = _fmt_time(r["start_time"])
+            end_str = _fmt_time(r["end_time"])
+            score = r["similarity_score"]
+            if verbose:
+                click.echo(
+                    f"  #{i} [{score:.6f}] {basename} "
+                    f"@ {start_str}-{end_str}"
+                )
+            else:
+                click.echo(
+                    f"  #{i} [{score:.2f}] {basename} "
+                    f"@ {start_str}-{end_str}"
+                )
+
+        if trim:
+            from .trimmer import trim_top_result
+            clip_path = trim_top_result(results, output_dir)
+            click.echo(f"\nSaved clip: {clip_path}")
+
+    except Exception as e:
+        _handle_error(e)
 
 
 # -----------------------------------------------------------------------

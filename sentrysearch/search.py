@@ -8,6 +8,7 @@ def search_footage(
     query: str,
     store: SentryStore,
     n_results: int = 5,
+    verbose: bool = False,
 ) -> list[dict]:
     """Search indexed footage with a natural language query.
 
@@ -15,12 +16,13 @@ def search_footage(
         query: Natural language search string.
         store: SentryStore instance to search against.
         n_results: Maximum number of results to return.
+        verbose: If True, print debug info to stderr.
 
     Returns:
         List of result dicts sorted by relevance (best first).
         Each dict contains: source_file, start_time, end_time, similarity_score.
     """
-    query_embedding = embed_query(query)
+    query_embedding = embed_query(query, verbose=verbose)
     hits = store.search(query_embedding, n_results=n_results)
 
     results = []
@@ -32,7 +34,5 @@ def search_footage(
             "similarity_score": hit["score"],
         })
 
-    # Already sorted by ChromaDB (lowest distance first = highest score first),
-    # but enforce the contract explicitly.
     results.sort(key=lambda r: r["similarity_score"], reverse=True)
     return results
