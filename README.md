@@ -2,7 +2,7 @@
 
 Semantic search over dashcam footage. Type what you're looking for, get a trimmed clip back.
 
-<video src="https://github.com/YOURUSERNAME/sentrysearch/raw/main/docs/demo.mp4" controls width="100%"></video>
+<video src="https://github.com/ssrajadh/sentrysearch/raw/main/docs/demo.mp4" controls width="100%"></video>
 
 ## How it works
 
