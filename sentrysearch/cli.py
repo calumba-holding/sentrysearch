@@ -41,6 +41,33 @@ def _cache_last_clip(path: str) -> None:
         )
 
 
+def _cache_last_search(
+    results: list,
+    *,
+    query: str | None = None,
+    image_path: str | None = None,
+) -> None:
+    """Record the search query + results for cross-tool integration (sentrymerge).
+
+    Failures are non-fatal.
+    """
+    from pathlib import Path
+
+    from . import _toolkit_cache
+
+    try:
+        _toolkit_cache.write_last_search(
+            query=query,
+            results=results,
+            image_path=Path(os.path.abspath(image_path)) if image_path else None,
+        )
+    except Exception as e:
+        click.secho(
+            f"(warning: could not write last-search cache: {e})",
+            fg="yellow", err=True,
+        )
+
+
 def _open_file(path: str) -> None:
     """Open a file with the system's default application."""
     try:
@@ -645,6 +672,7 @@ def search(query, n_results, output_dir, trim, save_top, threshold, overlay, bac
             click.echo(f"  [verbose] backend={backend}, similarity threshold: {threshold}", err=True)
 
         results = search_footage(query, store, n_results=n_results, verbose=verbose)
+        _cache_last_search(results, query=query)
         _present_results(results, threshold, trim, save_top, output_dir, overlay, verbose)
 
     except Exception as e:
@@ -779,6 +807,7 @@ def img(image, n_results, output_dir, trim, save_top, threshold, overlay,
         results = search_footage_by_image(
             image, store, n_results=n_results, verbose=verbose,
         )
+        _cache_last_search(results, image_path=image)
         _present_results(results, threshold, trim, save_top, output_dir, overlay, verbose)
 
     except Exception as e:
