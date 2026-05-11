@@ -1,8 +1,8 @@
 [project]
 name = "sentrysearch"
 version = "0.1.0"
-description = "Search dashcam footage using natural language queries"
-requires-python = ">=3.11"
+description = "Search video footage using natural language queries"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "click>=8.1",
     "python-dotenv>=1.0",
