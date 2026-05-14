@@ -83,6 +83,7 @@ def _cache_last_search(
             results=results,
             image_path=Path(os.path.abspath(image_path)) if image_path else None,
         )
+        click.echo("Search results cached for sentrymerge --last", err=True)
     except Exception as e:
         click.secho(
             f"(warning: could not write last-search cache: {e})",
