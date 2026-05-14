@@ -25,6 +25,7 @@ Semantic search over video footage. Type what you're looking for, get a trimmed 
   - [Local Backend (no API key needed)](#local-backend-no-api-key-needed)
   - [Why the local model is fast](#why-the-local-model-is-fast)
   - [Tesla Metadata Overlay](#tesla-metadata-overlay)
+  - [Stitch with SentryMerge](#stitch-with-sentrymerge)
   - [Redact with SentryBlur](#redact-with-sentryblur)
   - [Managing the index](#managing-the-index)
   - [Verbose mode](#verbose-mode)
@@ -305,6 +306,17 @@ uv tool install ".[tesla]"
 Without geopy, the overlay still works but omits the city/road name.
 
 Source: [teslamotors/dashcam](https://github.com/teslamotors/dashcam)
+
+### Stitch with SentryMerge
+
+[SentryMerge](https://github.com/ssrajadh/sentrymerge) is a sibling tool that auto-cuts a single cross-camera video of one event from a SentrySearch result. Every time `sentrysearch search` runs, it caches the result list to `~/.sentrysearch/last_search.json`; SentryMerge picks that up via `--last`, picks the best multi-camera clip-set, asks a VLM for sub-second visibility ranges per camera, and stitches one frame-accurate video that follows the subject across cameras:
+
+```bash
+sentrysearch search "<query>"
+sentrymerge --last                      # → merge.mp4
+```
+
+`--last` works without re-running search; `sentrymerge --query "..."` re-runs search under the hood. See the [SentryMerge README](https://github.com/ssrajadh/sentrymerge#readme) for install instructions, VLM backend options (Gemini / OpenAI / local Qwen), and the modular cam-config system for non-Tesla dashcams.
 
 ### Redact with SentryBlur
 
